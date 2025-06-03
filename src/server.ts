@@ -7,6 +7,8 @@ import shortUrlRedirect from "./routes/url/short-url-redirect"
 const app = express()
 const port = 8080
 
+app.set('trust proxy', 1);
+
 connectToDatabase()
 app.use(express.json())
 app.listen(port, () => console.log(`Server is running on port ${port}`))
