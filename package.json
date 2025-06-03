@@ -5,14 +5,20 @@
   "license": "ISC",
   "author": "",
   "type": "module",
-  "main": "src/server.ts",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
   "scripts": {
-    "dev": "tsx watch src/server.ts"
+    "dev": "tsx watch src/server.ts",
+    "build": "tsup src",
+    "start": "node dist/server.js"
   },
   "devDependencies": {
     "@types/express": "^5.0.2",
     "@types/mongoose": "^5.11.96",
     "@types/node": "^22.15.29",
+    "tsup": "^8.5.0",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3"
   },
