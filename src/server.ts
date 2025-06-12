@@ -1,17 +1,18 @@
-import express from "express"
-import "dotenv/config"
-import shortenUrl from "./routes/url/shorten-url"
-import { connectToDatabase } from "./lib/mongodb"
-import shortUrlRedirect from "./routes/url/short-url-redirect"
+import express from "express";
+import "dotenv/config";
+import { connectToDatabase } from "./lib/mongodb";
+import shorten from "./routes/url/shorten";
+import redirect from "./routes/redirect";
 
-const app = express()
-const port = 8080
+const app = express();
+const port = 8080;
 
-app.set('trust proxy', 1);
+app.set("trust proxy", 1);
+app.use(express.json());
 
-connectToDatabase()
-app.use(express.json())
-app.listen(port, () => console.log(`Server is running on port ${port}`))
+connectToDatabase();
+app.listen(port, () => console.log(`Server is running on port ${port}`));
 
-app.use(shortenUrl)
-app.use(shortUrlRedirect)
+// URL
+app.use("/url", shorten);
+app.use(redirect);
