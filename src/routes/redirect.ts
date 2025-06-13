@@ -1,49 +1,54 @@
 import { Router } from "express";
 import { z, ZodError } from "zod";
 import { UrlModel } from "../models/url.model";
+import { zodValidation } from "../middlewares/zod-validation";
+import path from "node:path";
 
 const router = Router();
 
-export default router.get("/:shortUrlCode", async (req, res) => {
-  const paramsSchema = z.object({
-    shortUrlCode: z.string({
-      message: "originalUrl is required in the params",
-    }),
-  });
+const paramsSchema = z.object({
+  shortCode: z.string({
+    message: "originalUrl is required in the params",
+  }),
+});
 
-  try {
-    const { shortUrlCode } = paramsSchema.parse(req.params);
+export default router.get(
+  "/:shortCode",
+  zodValidation("params", paramsSchema),
+  async (req, res) => {
+    const { shortCode } = req.params;
 
     try {
-      const data = await UrlModel.findOne({ shortUrlCode });
+      const validShortUrl = await UrlModel.findOne({
+        $or: [{ shortCode }, { customAlias: shortCode }],
+      });
 
-      if (!data) {
-        res.status(404).json({ error: `Essa url não existe.` });
+      if (!validShortUrl) {
+        res.status(404).json({ success: false, message: "Invalid URL" });
         return;
       }
 
-      await UrlModel.updateOne(
-        { shortUrlCode: data.shortUrlCode },
+      const update = await UrlModel.updateOne(
+        { _id: validShortUrl.id },
         {
-          clicks: data.clicks + 1,
+          clicks: validShortUrl.clicks + 1,
           lastAccessedAt: Date.now(),
         },
       );
+      console.log(update);
 
-      res.redirect(data.originalUrl);
+      res.status(301).redirect(validShortUrl.originalUrl);
     } catch (error) {
-      res.status(500).json({ error });
-      return;
-    }
-  } catch (error) {
-    if (error instanceof ZodError) {
-      const errorMessage = error.errors[0].message;
-      res.status(400).json({ error: errorMessage });
-      return;
-    }
+      if (error instanceof ZodError) {
+        const errorMessage = error.errors[0].message;
+        res.status(400).json({ success: false, message: errorMessage });
+        return;
+      }
 
-    res.status(500).json({
-      error: "Erro interno do servidor, o erro foi causado por causa do Zod",
-    });
-  }
-});
+      res.status(500).json({
+        success: false,
+        message: `Internal Server Error (${path.basename(import.meta.filename)})`,
+      });
+    }
+  },
+);

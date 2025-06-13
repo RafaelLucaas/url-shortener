@@ -1,76 +1,127 @@
 import { Router } from "express";
-import { z, ZodError } from "zod";
+import { z } from "zod";
 import { UrlModel } from "../../models/url.model";
+import { zodValidation } from "../../middlewares/zod-validation";
+import { UserModel } from "../../models/user.model";
+import path from "node:path";
 
 const router = Router();
 
-export default router.post("/shorten", async (req, res) => {
-  const bodySchema = z.object({
-    originalUrl: z
-      .string({ message: "originalUrl is required in the body." })
-      .url({ message: "originalUrl must be a valid link." }),
-  });
+const bodySchema = z.object({
+  originalUrl: z
+    .string({ message: "originalUrl is required in the body." })
+    .url({ message: "originalUrl must be a valid link." }),
+  customAlias: z
+    .string({ message: "customAlias is required in the body" })
+    .min(3, { message: "customAlias must be at least 3 characters long" })
+    .optional(),
+});
 
-  try {
-    const { originalUrl } = bodySchema.parse(req.body);
+const headersSchema = z.object({
+  Authorization: z.string().optional(),
+});
 
-    const characters =
-      "ABCDEFGKIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    const codeLength = 6;
-    let code = "";
-    let doesCodeExistInDB = true;
+export default router.post(
+  "/shorten",
+  zodValidation("body", bodySchema),
+  zodValidation("headers", headersSchema),
+  async (req, res) => {
+    const { originalUrl, customAlias } = req.body;
+    const { authorization } = req.headers;
 
-    while (doesCodeExistInDB) {
-      for (let i = 0; i < codeLength; i++) {
-        const index = Math.floor(Math.random() * characters.length);
-        code += characters[index];
-      }
+    async function generateShortCode(): Promise<string> {
+      const characters =
+        "ABCDEFGKIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+      const codeLength = 6;
+      let code = "";
 
-      const isCodeInDB = await UrlModel.findOne({ shortUrlCode: code });
+      while (true) {
+        for (let i = 0; i < codeLength; i++) {
+          const index = Math.floor(Math.random() * characters.length);
+          code += characters[index];
+        }
 
-      if (!isCodeInDB) {
-        doesCodeExistInDB = false;
-        console.log("Não tem o code no database");
-      } else {
-        console.log("O Code já existe no DB");
-        return;
+        const isCodeInDB = await UrlModel.findOne({
+          $or: [{ shortCode: code }, { customAlias: code }],
+        });
+
+        if (!isCodeInDB) return code;
       }
     }
-
-    const dataToDB = {
-      createdAt: Date.now(),
-      shortUrlCode: code,
-      originalUrl,
-    };
 
     try {
-      const url = await UrlModel.create(dataToDB);
+      const token =
+        authorization && typeof authorization === "string"
+          ? authorization.split(" ")[1]
+          : undefined;
 
-      const shortUrl = `${req.protocol}://${req.headers.host}/${url.shortUrlCode}`;
+      let user = null;
 
-      const resResult = {
-        createdAt: url.createdAt,
-        shortUrl,
-        shortUrlCode: url.shortUrlCode,
-        originalUrl: url.originalUrl,
-      };
-
-      res.status(201).json(resResult);
-    } catch (error) {
-      if (error) {
-        res.status(500).json({ error });
+      if (token) {
+        user = await UserModel.findOne({ token });
+        if (!user && customAlias) {
+          res.status(401).json({
+            success: false,
+            message: "Unauthorized or Invalid Token",
+          });
+          return;
+        }
+      } else if (!token && customAlias) {
+        res.status(401).json({
+          success: false,
+          message: "Unauthorized or Invalid Token",
+        });
         return;
       }
-    }
-  } catch (error) {
-    if (error instanceof ZodError) {
-      const errorMessage = error.errors[0].message;
-      res.status(400).json({ error: errorMessage });
+      if (customAlias) {
+        const customAliasExists = await UrlModel.findOne({
+          $or: [{ customAlias }, { shortCode: customAlias }],
+        });
+
+        if (customAliasExists) {
+          res.status(409).json({
+            success: false,
+            message: "customAlias already exists",
+          });
+          return;
+        }
+      }
+
+      const shortCode = await generateShortCode();
+
+      const newUrlData = new UrlModel({
+        shortCode,
+        originalUrl,
+      });
+
+      if (user) newUrlData.userId = user.id;
+      if (customAlias) newUrlData.customAlias = customAlias;
+
+      await newUrlData.save();
+
+      if (user) {
+        await UserModel.updateOne(
+          { _id: user._id },
+          {
+            $addToSet: { urls: newUrlData._id },
+          },
+        );
+      }
+
+      const shortUrl = `${req.protocol}://${req.headers.host}/${newUrlData.shortCode}`;
+
+      res.status(201).json({
+        success: true,
+        message: "Short URL created successfully!",
+        data: { shortUrl },
+      });
+    } catch (error) {
+      console.log(error);
+      res.status(500).json({
+        success: false,
+        message: `Internal Server Error (${path.basename(import.meta.filename)})`,
+      });
       return;
     }
-
-    res.status(500).json({
-      error: "Erro interno do servidor, o erro foi causado por causa do Zod",
-    });
-  }
-});
+  },
+);
